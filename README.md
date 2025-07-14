@@ -1,59 +1,96 @@
-# System_Audit_Repo
-Bash Scripting Project
-cat > system_audit_repo/system_audit.sh <<- "EOF"
 #!/bin/bash
+# Define the report file name with a timestamp
+TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
+REPORT_FILE="$HOME/Desktop/system_audit_report_$TIMESTAMP.txt"
+USAGE=$()
+# Start of the report
+echo "=========================================" > "$REPORT_FILE"
+echo "  System and Security Audit" >> "$REPORT_FILE"
+echo "=========================================" >> "$REPORT_FILE"
+echo "" >> "$REPORT_FILE"
 
-# Define log file
-AUDIT_LOG="system_audit.log"
+echo "Report generated on: $(date)" >> "$REPORT_FILE"
+echo "-----------------------------------------" >> "$REPORT_FILE"
+echo "" >> "$REPORT_FILE"
 
-# Create a separator with date
-echo "===== System Audit Report - $(date) =====" | tee -a $AUDIT_LOG
+echo "1. System Information" >> "$REPORT_FILE"
+echo "---------------------" >> "$REPORT_FILE"
+echo "Hostname: $(hostname)" >> "$REPORT_FILE"
+echo "IP Address: $(hostname -I | awk '{print $1}')" >> "$REPORT_FILE" # Get the first IP address
+echo "Uptime: $(uptime)" >> "$REPORT_FILE"
+echo "Kernel Version: $(uname -r)" >> "$REPORT_FILE"
+echo "" >> "$REPORT_FILE"
+# Define the disk usage threshold (80%))
+DISK_USAGE_THRESHOLD=80
 
-# Check failed services
-echo -e "\n[+] Checking Failed Services:" | tee -a $AUDIT_LOG
-systemctl --failed | tee -a $AUDIT_LOG
+echo "2. Disk Usage" >> "$REPORT_FILE"
+echo "---------------" >> "$REPORT_FILE"
 
-# Check critical system logs for errors
-echo -e "\n[+] Checking Critical System Logs (Priority 3+):" | tee -a $AUDIT_LOG
-journalctl -b -p 3 --no-pager | tail -20 | tee -a $AUDIT_LOG
+# Get disk usage 
+df -h | grep -v "snap" | grep -v "tmpfs" | grep -v "udev" | grep -v "devtmpfs" | tail -n +2 | while read -r LINE; do
+    USAGE=$(echo "$LINE" | awk '{print $5}' | sed 's/%//g')
+    FILESYSTEM=$(echo "$LINE" | awk '{print $1}')
+    MOUNTPOINT=$(echo "$LINE" | awk '{print $6}')
 
-# Check system uptime
-echo -e "\n[+] System Uptime:" | tee -a $AUDIT_LOG
-uptime -p | tee -a $AUDIT_LOG
+    echo "Filesystem: $FILESYSTEM, Mountpoint: $MOUNTPOINT, Usage: $USAGE%" >> "$REPORT_FILE"
+    if ((USAGE >= DISK_USAGE_THRESHOLD )); then
+        echo "  *** WARNING: Disk usage on $MOUNTPOINT exceeds ${DISK_USAGE_THRESHOLD}%! ***" >> "$REPORT_FILE"
+    fi 
+    done
+echo "" >> "$REPORT_FILE"
+echo "3. Logged-in Users and Potential Insecure Accounts" >> "$REPORT_FILE"
+echo "----------------------------------------------------" >> "$REPORT_FILE"
 
-# Check disk space
-echo -e "\n[+] Disk Usage:" | tee -a $AUDIT_LOG
-df -h | tee -a $AUDIT_LOG
+echo "Currently logged-in users:" >> "$REPORT_FILE"
+who >> "$REPORT_FILE"
+echo "" >> "$REPORT_FILE"
 
-# Check memory usage
-echo -e "\n[+] Memory Usage:" | tee -a $AUDIT_LOG
-free -h | tee -a $AUDIT_LOG
-
-# Check CPU load and top processes
-echo -e "\n[+] CPU Load and Top Processes:" | tee -a $AUDIT_LOG
-top -b -n1 | head -15 | tee -a $AUDIT_LOG
-
-# Check active system services
-echo -e "\n[+] Active System Services:" | tee -a $AUDIT_LOG
-systemctl list-units --type=service --state=running | tee -a $AUDIT_LOG
-
-# Check network status and open ports
-echo -e "\n[+] Network Status and Open Ports:" | tee -a $AUDIT_LOG
-ip a | tee -a $AUDIT_LOG
-ss -tuln | tee -a $AUDIT_LOG # Shows listening TCP and UDP sockets
-
-# Check for security updates (Debian/Ubuntu)
-if [ -x "$(command -v apt)" ]; then
-    echo -e "\n[+] Checking Available Security Updates (Debian/Ubuntu):" | tee -a $AUDIT_LOG
-    apt list --upgradable 2>/dev/null | tee -a $AUDIT_LOG
+echo "Checking for user accounts with empty passwords:" >> "$REPORT_FILE"
+# It's important to use tools like `passwd -S` or analyze /etc/shadow securely
+# Direct parsing of /etc/passwd or /etc/shadow for this purpose requires root privileges
+# and could be prone to errors or security issues if not done carefully.
+# For a basic audit, we'll indicate if it's possible to check.
+if [ -f "/etc/shadow" ] && [ -r "/etc/shadow" ]; then
+    EMPTY_PASSWORD_USERS=$(sudo awk -F: '($2 == "") {print $1}' /etc/shadow 2>/dev/null)
+    if [ -n "$EMPTY_PASSWORD_USERS" ]; then
+        echo "  WARNING: The following user(s) have empty passwords (security risk):" >> "$REPORT_FILE"
+        echo "$EMPTY_PASSWORD_USERS" >> "$REPORT_FILE"
+    else
+        echo "  No user accounts with empty passwords found." >> "$REPORT_FILE"
+    fi
+else
+    echo "  Cannot check for empty passwords (requires root privileges or /etc/shadow is not readable)." >> "$REPORT_FILE"
 fi
+echo "" >> "$REPORT_FILE"
+echo "4. Top Memory-Consuming Processes (Top 5)" >> "$REPORT_FILE"
+echo "--------------------------------------------" >> "$REPORT_FILE"
+ps aux --sort=-%mem | head -n 5 >> "$REPORT_FILE" # Displaying header and top 5 processes
+echo "" >> "$REPORT_FILE"
+echo "5. Essential Service Status" >> "$REPORT_FILE"
+echo "-----------------------------" >> "$REPORT_FILE"
+SERVICES=("systemd" "auditd" "cron" "ufw")
+for SERVICE in "${SERVICES[@]}"; do
+    if systemctl -q is-active "$SERVICE"; then
+        echo "$SERVICE: Running" >> "$REPORT_FILE"
+    else
+        echo "$SERVICE: Not Running" >> "$REPORT_FILE"
+    fi
+done
+echo "" >> "$REPORT_FILE"
+echo "6. Failed Login Attempts (Last 24 Hours)" >> "$REPORT_FILE"
+echo "------------------------------------------" >> "$REPORT_FILE"
 
-# Check for security updates (RHEL/CentOS)
-if [ -x "$(command -v yum)" ]; then
-    echo -e "\n[+] Checking Available Security Updates (RHEL/CentOS):" | tee -a $AUDIT_LOG
-    yum check-update --security | tee -a $AUDIT_LOG
+# /var/log/auth.log 
+if [ -f "/var/log/auth.log" ] && [ -r "/var/log/auth.log" ]; then
+    FAILED_ATTEMPTS=$(grep "Failed password" /var/log/auth.log | tail -n 10) # Check last 10 failed attempts
+    if [ -n "$FAILED_ATTEMPTS" ]; then
+        echo "  The following failed login attempts were detected:" >> "$REPORT_FILE"
+        echo "$FAILED_ATTEMPTS" >> "$REPORT_FILE"
+    else
+        echo "  No failed login attempts found in recent logs." >> "$REPORT_FILE"
+    fi
+else
+    echo "  Authentication log file (/var/log/auth.log) not found." >> "$REPORT_FILE"
 fi
-
-echo "Audit completed. Results saved to $AUDIT_LOG" | tee -a $AUDIT_LOG
-
-EOF
+echo "" >> "$REPORT_FILE"
+echo  "Done"
