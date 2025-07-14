@@ -46,9 +46,7 @@ who >> "$REPORT_FILE"
 echo "" >> "$REPORT_FILE"
 
 echo "Checking for user accounts with empty passwords:" >> "$REPORT_FILE"
-# It's important to use tools like `passwd -S` or analyze /etc/shadow securely
-# Direct parsing of /etc/passwd or /etc/shadow for this purpose requires root privileges
-# and could be prone to errors or security issues if not done carefully.
+# Requires root privileges 
 # For a basic audit, we'll indicate if it's possible to check.
 if [ -f "/etc/shadow" ] && [ -r "/etc/shadow" ]; then
     EMPTY_PASSWORD_USERS=$(sudo awk -F: '($2 == "") {print $1}' /etc/shadow 2>/dev/null)
